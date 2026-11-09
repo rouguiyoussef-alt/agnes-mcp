@@ -676,7 +676,7 @@ def get_agnes_config() -> str:
 
 def main():
     """Entry point for the MCP server."""
-    mcp.run()
+    mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":
