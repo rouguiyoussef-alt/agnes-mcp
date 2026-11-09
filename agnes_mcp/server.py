@@ -378,7 +378,14 @@ async def generate_video(
 
 # ==================== MCP Server ====================
 
-mcp = FastMCP("agnes-mcp")
+mcp = FastMCP(
+    "agnes-mcp",
+    host="0.0.0.0",
+    port=int(os.environ.get("PORT", "10000")),
+    # Secret path so only you (and Claude) can use your Agnes key.
+    streamable_http_path=os.environ.get("MCP_PATH", "/mcp"),
+    stateless_http=True,
+)
 
 
 @mcp.tool()
@@ -676,7 +683,7 @@ def get_agnes_config() -> str:
 
 def main():
     """Entry point for the MCP server."""
-    mcp.settings.host = "0.0.0.0"; mcp.settings.port = int(os.environ.get("PORT", "10000")); mcp.run(transport="streamable-http")
+    mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":
