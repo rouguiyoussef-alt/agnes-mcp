@@ -18,10 +18,13 @@ from pathlib import Path
 from urllib.parse import urlparse
 from typing import Any
 
-import httpx
-from mcp.server.fastmcp import FastMCP
+import io
+import json
 
-__version__ = "0.3.1"
+import httpx
+from mcp.server.fastmcp import FastMCP, Image
+
+__version__ = "0.3.2"
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +379,41 @@ async def generate_video(
     raise AgnesError(f"Video generation timed out after {poll_timeout}s")
 
 
+
+# ==================== Inline image previews ====================
+
+PREVIEW_MAX_SIDE = 1024
+
+
+def _preview_image(local_path: str | None) -> Image | None:
+    """Turn a saved image into an inline MCP image so the client sees it
+    directly, without having to download it from the Agnes CDN."""
+    if not local_path:
+        return None
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(local_path) as im:
+            im = im.convert("RGB")
+            im.thumbnail((PREVIEW_MAX_SIDE, PREVIEW_MAX_SIDE))
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=85)
+        return Image(data=buf.getvalue(), format="jpeg")
+    except Exception as e:  # never fail the tool because of the preview
+        logger.warning("Could not build image preview for %s: %s", local_path, e)
+        return None
+
+
+def _with_previews(result: dict[str, Any]) -> list[Any]:
+    """Return the JSON result plus one inline image per generated picture."""
+    content: list[Any] = [json.dumps(result, ensure_ascii=False, indent=2)]
+    for item in result.get("images") or []:
+        preview = _preview_image(item.get("local_path"))
+        if preview is not None:
+            content.append(preview)
+    return content
+
+
 # ==================== MCP Server ====================
 
 mcp = FastMCP(
@@ -388,7 +426,7 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def text_to_image(
     prompt: str,
     model: str = "agnes-image-2.1-flash",
@@ -397,7 +435,7 @@ async def text_to_image(
     images: list[str] | None = None,
     output_dir: str = "",
     return_mode: str = "url",
-) -> dict[str, Any]:
+) -> list[Any]:
     """Generate images from text using Agnes AI.
 
     Supports two models:
@@ -414,9 +452,10 @@ async def text_to_image(
         return_mode: 'url' for image URL, 'b64' for base64 + local save.
 
     Returns:
-        dict with url, local_path, model, size, n, images.
+        JSON with url, local_path, model, size, n, images, followed by the
+        generated image(s) inline so you can see them directly.
     """
-    return await generate_image(
+    result = await generate_image(
         prompt=prompt,
         output_dir=_resolve_output_dir(output_dir),
         model=model,
@@ -425,9 +464,10 @@ async def text_to_image(
         n=max(1, min(n, 4)),
         images=images or None,
     )
+    return _with_previews(result)
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def image_to_image(
     prompt: str,
     images: list[str],
@@ -436,7 +476,7 @@ async def image_to_image(
     n: int = 1,
     output_dir: str = "",
     return_mode: str = "url",
-) -> dict[str, Any]:
+) -> list[Any]:
     """Generate new image(s) based on reference image(s) and a text prompt.
 
     This is image-to-image generation: provide one or more reference images
@@ -452,12 +492,13 @@ async def image_to_image(
         return_mode: 'url' for image URL, 'b64' for base64 + local save.
 
     Returns:
-        dict with url, local_path, model, size, n, images.
+        JSON with url, local_path, model, size, n, images, followed by the
+        generated image(s) inline so you can see them directly.
     """
     if not images:
         raise AgnesError("images list cannot be empty for image-to-image generation")
 
-    return await generate_image(
+    result = await generate_image(
         prompt=prompt,
         output_dir=_resolve_output_dir(output_dir),
         model=model,
@@ -466,6 +507,7 @@ async def image_to_image(
         n=max(1, min(n, 4)),
         images=images,
     )
+    return _with_previews(result)
 
 
 @mcp.tool()
