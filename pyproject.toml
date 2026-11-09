@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "httpx",
-    "mcp[cli]",
+    "mcp[cli]>=1.0,<2.0",
 ]
 
 [project.scripts]
